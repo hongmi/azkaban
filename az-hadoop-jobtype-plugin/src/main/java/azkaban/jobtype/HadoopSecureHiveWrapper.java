@@ -25,10 +25,13 @@ import static org.apache.hadoop.security.UserGroupInformation.HADOOP_TOKEN_FILE_
 import java.io.File;
 import java.io.IOException;
 import java.security.PrivilegedExceptionAction;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
+import java.net.URL;
+import java.net.URLClassLoader;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import org.apache.hadoop.hive.ql.exec.UDFClassLoader;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.hive.cli.CliDriver;
@@ -78,6 +81,75 @@ public class HadoopSecureHiveWrapper {
     }
   }
 
+
+    ///////start customized by hongmin 2019 12 18
+    //由于cdh6.3.2自带的hive-exec.jar和hive-exec-core.jar没有Utilities.addClassPath函数，因此此处进行补充
+    /**
+     * Create a URL from a string representing a path to a local file.
+     * The path string can be just a path, or can start with file:/, file:///
+     * @param onestr  path string
+     * @return
+     */
+    private static URL urlFromPathString(String onestr) {
+	URL oneurl = null;
+	try {
+	    if (StringUtils.indexOf(onestr, "file:/") == 0) {
+		oneurl = new URL(onestr);
+	    } else {
+		oneurl = new File(onestr).toURL();
+	    }
+	} catch (Exception err) {
+	    logger.error("Bad URL " + onestr + ", ignoring path");
+	}
+	return oneurl;
+    }
+
+    private static boolean useExistingClassLoader(ClassLoader cl) {
+	if (!(cl instanceof UDFClassLoader)) {
+	    // Cannot use the same classloader if it is not an instance of {@code UDFClassLoader}
+	    return false;
+	}
+	final UDFClassLoader udfClassLoader = (UDFClassLoader) cl;
+	if (udfClassLoader.isClosed()) {
+	    // The classloader may have been closed, Cannot add to the same instance
+	    return false;
+	}
+	return true;
+    }
+
+    /**
+     * Add new elements to the classpath.
+     *
+     * @param newPaths
+     *          Array of classpath elements
+     */
+    public static ClassLoader addToClassPath(ClassLoader cloader, String[] newPaths) throws Exception {
+	final URLClassLoader loader = (URLClassLoader) cloader;
+	if (useExistingClassLoader(cloader)) {
+	    final UDFClassLoader udfClassLoader = (UDFClassLoader) loader;
+	    for (String path : newPaths) {
+		udfClassLoader.addURL(urlFromPathString(path));
+	    }
+	    return udfClassLoader;
+	} else {
+	    return createUDFClassLoader(loader, newPaths);
+	}
+    }
+
+    public static ClassLoader createUDFClassLoader(URLClassLoader loader, String[] newPaths) {
+	final Set<URL> curPathsSet = Sets.newHashSet(loader.getURLs());
+	final List<URL> curPaths = Lists.newArrayList(curPathsSet);
+	for (String onestr : newPaths) {
+	    final URL oneurl = urlFromPathString(onestr);
+	    if (oneurl != null && !curPathsSet.contains(oneurl)) {
+		curPaths.add(oneurl);
+	    }
+	}
+	return new UDFClassLoader(curPaths.toArray(new URL[0]), loader);
+    }
+
+
+    ////////end customized by hongmin 2019 12 18
   public static void runHive(String[] args) throws Exception {
 
     final HiveConf hiveConf = new HiveConf(SessionState.class);
@@ -121,7 +193,7 @@ public class HadoopSecureHiveWrapper {
 
     if (StringUtils.isNotBlank(auxJars)) {
       loader =
-          Utilities.addToClassPath(loader, StringUtils.split(auxJars, ","));
+          addToClassPath(loader, StringUtils.split(auxJars, ","));
     }
     hiveConf.setClassLoader(loader);
     Thread.currentThread().setContextClassLoader(loader);

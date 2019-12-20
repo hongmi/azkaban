@@ -27,10 +27,10 @@ dependencies {
     compile(deps.hiveCli) {
         transitive = false
     }
-    compile("org.apache.hive:hive-metastore:0.12.0") {
+    compile("org.apache.hive:hive-metastore:2.1.1") {
         force = true
     }
-    compile("org.apache.hive:hive-shims:0.12.0") {
+    compile("org.apache.hive:hive-shims:2.1.1") {
         force = true
     }
     compile(deps.hiveExecCore) {
